@@ -2,7 +2,7 @@
 set -e
 
 echo ""
-echo "  ⬡  Synapse v2— SRE Incident Co-Pilot"
+echo "  ⬡  Synapse — SRE Incident Co-Pilot"
 echo "  ───────────────────────────────────────────"
 echo "  Agentic · Hybrid Search · Multi-turn · Offline"
 echo ""
