@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+env/
+.env
+.venv
+
+# ClickHouse data
+clickhouse-data/
+clickhouse_config/
+
+# Vector data
+vector-data/
+
+# Streamlit
+.streamlit/
+*.pid
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Local configs (contains secrets)
+clickhouse-config/
+local-settings.py
