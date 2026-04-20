@@ -1,0 +1,9 @@
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+  "E501",  # line too long — handled by formatter separately
+  "E741",  # ambiguous variable name (l, O, I) — common in short SQL helpers
+]
