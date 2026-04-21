@@ -1,0 +1,81 @@
+# Synapse  — SRE Incident Co-Pilot
+# Agentic RAG: Ollama tool-use · Postgres hybrid search · Streaming · Multi-turn
+#
+# First run:  ./start.sh   (or: docker compose up)
+# Dashboard:  http://localhost:8501
+#
+# Models pulled on first start (cached in volume after that):
+#   qwen2.5-coder:7b   — main inference + tool-use (~4.7GB)
+#   nomic-embed-text   — 768-dim embeddings         (~274MB)
+#
+# To override defaults, copy .env.example → .env and edit.
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: synapse-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops}
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ops} -d ${POSTGRES_DB:-synapse}"]
+      interval: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: synapse-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ollama serve &
+        sleep 5
+        ollama pull ${OLLAMA_MODEL:-qwen2.5-coder:7b}
+        ollama pull ${EMBED_MODEL:-nomic-embed-text}
+        wait
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q qwen2.5-coder || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 360s   # first run pulls ~5GB total
+
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: synapse-app
+    ports:
+      - "8501:8501"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-ops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops}
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      KB_DIR: /kb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./kb:/kb
+
+volumes:
+  pg_data:
+  ollama_models:
