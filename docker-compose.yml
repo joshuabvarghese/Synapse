@@ -1,81 +1,102 @@
-# Synapse  — SRE Incident Co-Pilot
-# Agentic RAG: Ollama tool-use · Postgres hybrid search · Streaming · Multi-turn
+# ── Synapse · docker-compose.yml ─────────────────────────────────────────────
+# Three services: postgres (pgvector), ollama (LLM + embeddings), app (Streamlit)
 #
-# First run:  ./start.sh   (or: docker compose up)
-# Dashboard:  http://localhost:8501
-#
-# Models pulled on first start (cached in volume after that):
-#   qwen2.5-coder:7b   — main inference + tool-use (~4.7GB)
-#   nomic-embed-text   — 768-dim embeddings         (~274MB)
-#
-# To override defaults, copy .env.example → .env and edit.
+# Quick start:   ./start.sh   or   make up
+# GPU support:   uncomment the `deploy` block under `ollama`
+# Custom model:  set OLLAMA_MODEL in .env  (see .env.example)
+
+name: synapse
 
 services:
 
+  # ── Postgres 16 + pgvector ──────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: synapse-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ops}
+      POSTGRES_USER:     ${POSTGRES_USER:-ops}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops}
-      POSTGRES_DB: ${POSTGRES_DB:-synapse}
-    ports:
-      - "5432:5432"
+      POSTGRES_DB:       ${POSTGRES_DB:-synapse}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      # Schema runs on first boot; idempotent (IF NOT EXISTS throughout)
+      - ./app/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ops} -d ${POSTGRES_DB:-synapse}"]
       interval: 5s
-      retries: 10
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    networks: [synapse]
 
+  # ── Ollama — inference + embeddings ────────────────────────────────────────
+  # First run pulls qwen2.5-coder:7b (~4 GB) and nomic-embed-text (~300 MB).
+  # Models are cached in the `ollama_data` volume — never re-downloaded.
+  #
+  # GPU (NVIDIA):  uncomment the `deploy` section below and set
+  #                OLLAMA_NUM_GPU=1 in .env
   ollama:
     image: ollama/ollama:latest
-    container_name: synapse-ollama
-    ports:
-      - "11434:11434"
     volumes:
-      - ollama_models:/root/.ollama
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        ollama serve &
-        sleep 5
-        ollama pull ${OLLAMA_MODEL:-qwen2.5-coder:7b}
-        ollama pull ${EMBED_MODEL:-nomic-embed-text}
-        wait
+      - ollama_data:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+    # ── Uncomment for NVIDIA GPU ─────────────────────────────────────────────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q qwen2.5-coder || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 40
-      start_period: 360s   # first run pulls ~5GB total
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18            # up to 3 min for first-run model pull
+      start_period: 20s
+    restart: unless-stopped
+    networks: [synapse]
 
+  # ── Streamlit app ───────────────────────────────────────────────────────────
   app:
     build:
-      context: .
-      dockerfile: app/Dockerfile
-    container_name: synapse-app
+      context: ./app
+      dockerfile: Dockerfile
     ports:
-      - "8501:8501"
+      - "${APP_PORT:-8501}:8501"
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-ops}
+      POSTGRES_HOST:     postgres
+      POSTGRES_USER:     ${POSTGRES_USER:-ops}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops}
-      POSTGRES_DB: ${POSTGRES_DB:-synapse}
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
-      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
-      KB_DIR: /kb
+      POSTGRES_DB:       ${POSTGRES_DB:-synapse}
+      OLLAMA_HOST:       http://ollama:11434
+      OLLAMA_MODEL:      ${OLLAMA_MODEL:-qwen2.5-coder:7b}
+      EMBED_MODEL:       ${EMBED_MODEL:-nomic-embed-text}
+      KB_DIR:            /kb
+    volumes:
+      # kb/ is bind-mounted read-only; watchdog picks up new .md files live
+      - ./kb:/kb:ro
     depends_on:
       postgres:
         condition: service_healthy
       ollama:
-        condition: service_healthy
-    volumes:
-      - ./kb:/kb
+        condition: service_started   # app handles "models still pulling" gracefully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8501/_stcore/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    networks: [synapse]
+
+networks:
+  synapse:
+    driver: bridge
 
 volumes:
-  pg_data:
-  ollama_models:
+  pg_data:       # postgres data — survives restarts
+  ollama_data:   # pulled models — survives restarts (~5 GB after first run)
