@@ -1,5 +1,5 @@
 """
-Synapse v2 — SRE Incident Co-Pilot
+Synapse — SRE Incident Co-Pilot
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Agentic RAG: Ollama tool-use loop · Postgres hybrid search (pgvector + FTS + RRF)
 Streaming UI · Multi-turn conversation · Live KB ingestion via watchdog
