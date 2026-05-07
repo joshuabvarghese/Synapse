@@ -95,15 +95,18 @@ def render_timeline(logs: list[dict]) -> str:
     rows_html: list[str] = []
     prev_ts = None
 
-    for log in reversed(logs[:60]):
+    # logs arrives newest-first (DESC from DB); reverse to get chronological order
+    chronological = list(reversed(logs[:60]))
+
+    for log in chronological:
         ts    = log["ts"].strftime("%H:%M:%S") if hasattr(log["ts"], "strftime") else str(log["ts"])
         level = log["level"]
         dot   = {"ERROR": "tl-dot-E", "WARN": "tl-dot-W"}.get(level, "tl-dot-I")
 
-        # Gap indicator
+        # Gap indicator — prev_ts is always earlier than log["ts"] now
         if prev_ts is not None:
             try:
-                gap = abs((log["ts"] - prev_ts).total_seconds())
+                gap = (log["ts"] - prev_ts).total_seconds()
                 if gap > 30:
                     rows_html.append(
                         f'<div style="text-align:center;color:#1a2030;font-family:JetBrains Mono;'
