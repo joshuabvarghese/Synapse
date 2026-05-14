@@ -1,102 +1,75 @@
-# ── Synapse · docker-compose.yml ─────────────────────────────────────────────
-# Three services: postgres (pgvector), ollama (LLM + embeddings), app (Streamlit)
-#
-# Quick start:   ./start.sh   or   make up
-# GPU support:   uncomment the `deploy` block under `ollama`
-# Custom model:  set OLLAMA_MODEL in .env  (see .env.example)
-
-name: synapse
+version: "3.9"
 
 services:
-
-  # ── Postgres 16 + pgvector ──────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER:     ${POSTGRES_USER:-ops}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops}
-      POSTGRES_DB:       ${POSTGRES_DB:-synapse}
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ops
+      POSTGRES_DB: synapse
     volumes:
       - pg_data:/var/lib/postgresql/data
-      # Schema runs on first boot; idempotent (IF NOT EXISTS throughout)
-      - ./app/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ops} -d ${POSTGRES_DB:-synapse}"]
+      test: ["CMD-SHELL", "pg_isready -U ops -d synapse"]
       interval: 5s
       timeout: 3s
-      retries: 12
-      start_period: 10s
+      retries: 10
     restart: unless-stopped
-    networks: [synapse]
 
-  # ── Ollama — inference + embeddings ────────────────────────────────────────
-  # First run pulls qwen2.5-coder:7b (~4 GB) and nomic-embed-text (~300 MB).
-  # Models are cached in the `ollama_data` volume — never re-downloaded.
-  #
-  # GPU (NVIDIA):  uncomment the `deploy` section below and set
-  #                OLLAMA_NUM_GPU=1 in .env
   ollama:
     image: ollama/ollama:latest
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    environment:
-      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
-    # ── Uncomment for NVIDIA GPU ─────────────────────────────────────────────
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+      - "11434:11434"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 18            # up to 3 min for first-run model pull
-      start_period: 20s
+      retries: 12
     restart: unless-stopped
-    networks: [synapse]
 
-  # ── Streamlit app ───────────────────────────────────────────────────────────
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "
+        ollama pull qwen2.5-coder:7b &&
+        ollama pull nomic-embed-text
+      "
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    restart: "no"
+
   app:
     build:
       context: ./app
       dockerfile: Dockerfile
     ports:
-      - "${APP_PORT:-8501}:8501"
-    environment:
-      POSTGRES_HOST:     postgres
-      POSTGRES_USER:     ${POSTGRES_USER:-ops}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops}
-      POSTGRES_DB:       ${POSTGRES_DB:-synapse}
-      OLLAMA_HOST:       http://ollama:11434
-      OLLAMA_MODEL:      ${OLLAMA_MODEL:-qwen2.5-coder:7b}
-      EMBED_MODEL:       ${EMBED_MODEL:-nomic-embed-text}
-      KB_DIR:            /kb
-    volumes:
-      # kb/ is bind-mounted read-only; watchdog picks up new .md files live
-      - ./kb:/kb:ro
+      - "8501:8501"
     depends_on:
       postgres:
         condition: service_healthy
       ollama:
-        condition: service_started   # app handles "models still pulling" gracefully
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8501/_stcore/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ops
+      POSTGRES_DB: synapse
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5-coder:7b
+      EMBED_MODEL: nomic-embed-text
+      KB_DIR: /kb
+    volumes:
+      - ./kb:/kb
     restart: unless-stopped
-    networks: [synapse]
-
-networks:
-  synapse:
-    driver: bridge
 
 volumes:
-  pg_data:       # postgres data — survives restarts
-  ollama_data:   # pulled models — survives restarts (~5 GB after first run)
+  pg_data:
+  ollama_data:
