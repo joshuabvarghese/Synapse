@@ -130,12 +130,16 @@ def _tool_search_kb(query: str, top_k: int) -> str:
     if not hits:
         return "No matching incidents found in knowledge base."
 
-    return "\n\n".join(
-        f"[{h['inc_id']}] {h['title']} (score={float(h['similarity']):.3f})\n"
-        f"  Severity: {h['severity']} | Service: {h['service']}\n"
-        f"  Resolution: {h['resolution'][:400]}..."
-        for h in hits
-    )
+    def _fmt(h: dict) -> str:
+        res = h["resolution"]
+        preview = res[:400] + ("..." if len(res) > 400 else "")
+        return (
+            f"[{h['inc_id']}] {h['title']} (score={float(h['similarity']):.3f})\n"
+            f"  Severity: {h['severity']} | Service: {h['service']}\n"
+            f"  Resolution: {preview}"
+        )
+
+    return "\n\n".join(_fmt(h) for h in hits)
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
