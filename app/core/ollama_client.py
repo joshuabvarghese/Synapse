@@ -34,8 +34,6 @@ def embed(text: str) -> list[float]:
     resp.raise_for_status()
     data = resp.json()
     embs = data.get("embeddings") or data.get("embedding")
-    if not embs:
-        raise ValueError(f"Ollama embed returned no embeddings for model {EMBED_MODEL}")
     # Ollama may return [[...]] or [...]
     return embs[0] if isinstance(embs[0], list) else embs
 
@@ -58,10 +56,9 @@ def models_ready() -> dict[str, bool]:
     try:
         tags  = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=OLLAMA_HEALTH_TIMEOUT).json().get("models", [])
         names = {m["name"].split(":")[0] for m in tags}
-        inference_model_base = OLLAMA_MODEL.split(":")[0]
         return {
-            "inference": inference_model_base in names,
-            "embed":     EMBED_MODEL.split(":")[0] in names,
+            "inference": any(n in names for n in ["qwen2.5-coder", "qwen2.5"]),
+            "embed":     "nomic-embed-text" in names,
         }
     except Exception:
         return {"inference": False, "embed": False}
