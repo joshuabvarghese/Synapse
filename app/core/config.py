@@ -45,7 +45,7 @@ AGENT_MAX_STEPS        = int(os.environ.get("AGENT_MAX_STEPS", "10"))
 KB_DIR          = Path(os.environ.get("KB_DIR", "/kb"))
 KB_FALLBACK_DIR = Path("/app/kb")
 RRF_K           = 60    # Reciprocal Rank Fusion constant
-HYBRID_TOP_K    = 4     # default results returned by hybrid_search
+HYBRID_TOP_K    = int(os.environ.get("HYBRID_TOP_K", "2"))  # default results returned by hybrid_search
 
 # ── Auto-refresh ──────────────────────────────────────────────────────────────
 
