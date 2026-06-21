@@ -38,7 +38,7 @@ EMBED_MODEL  = os.environ.get("EMBED_MODEL",  "nomic-embed-text")
 OLLAMA_EMBED_TIMEOUT   = 30                                                # seconds
 OLLAMA_CHAT_TIMEOUT    = int(os.environ.get("OLLAMA_CHAT_TIMEOUT", "300"))  # seconds — CPU inference can be slow
 OLLAMA_HEALTH_TIMEOUT  = 3                                                 # seconds
-AGENT_MAX_STEPS        = 8
+AGENT_MAX_STEPS        = int(os.environ.get("AGENT_MAX_STEPS", "10"))
 
 # ── Knowledge base ────────────────────────────────────────────────────────────
 

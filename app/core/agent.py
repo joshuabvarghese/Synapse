@@ -268,8 +268,36 @@ def run(
 
     for step in range(AGENT_MAX_STEPS):
         logger.debug("Agent step %d/%d", step + 1, AGENT_MAX_STEPS)
-        message = chat(messages, tools=TOOLS)
+
+        is_last_step = step == AGENT_MAX_STEPS - 1
+
+        # Nudge a model that's exploring too long to start wrapping up.
+        if step == AGENT_MAX_STEPS - 2:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You are nearing your tool-call budget. If you have enough "
+                    "information, stop calling tools and give your FINAL answer "
+                    "now using the required headers."
+                ),
+            })
+
+        # On the final step, withhold tool definitions entirely so the model
+        # is forced to produce a plain-text answer instead of another call —
+        # guarantees we always return a real resolution, never just "ran out
+        # of steps" with nothing to show for it.
+        message = chat(messages, tools=None if is_last_step else TOOLS)
         messages.append(message)
+
+        if is_last_step:
+            resolution = message.get("content", "").strip()
+            if not resolution:
+                resolution = (
+                    "Agent reached max steps without a clear final answer. "
+                    "Review the tool trace above for partial findings."
+                )
+            record_mttr(scenario_key, sc["service"], sc["severity"])
+            return AgentResult(resolution=resolution, trace=trace)
 
         tool_calls = message.get("tool_calls") or []
 
@@ -313,6 +341,8 @@ def run(
             if on_tool_call:
                 on_tool_call(trace)
 
+    # Unreachable: the loop always returns on is_last_step, but kept as a
+    # defensive fallback in case AGENT_MAX_STEPS is ever set to 0.
     return AgentResult(
         resolution="Agent reached max steps. Review trace above.",
         trace=trace,
