@@ -35,9 +35,9 @@ OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b")
 EMBED_MODEL  = os.environ.get("EMBED_MODEL",  "nomic-embed-text")
 
-OLLAMA_EMBED_TIMEOUT   = 30   # seconds
-OLLAMA_CHAT_TIMEOUT    = 120  # seconds
-OLLAMA_HEALTH_TIMEOUT  = 3    # seconds
+OLLAMA_EMBED_TIMEOUT   = 30                                                # seconds
+OLLAMA_CHAT_TIMEOUT    = int(os.environ.get("OLLAMA_CHAT_TIMEOUT", "300"))  # seconds — CPU inference can be slow
+OLLAMA_HEALTH_TIMEOUT  = 3                                                 # seconds
 AGENT_MAX_STEPS        = 8
 
 # ── Knowledge base ────────────────────────────────────────────────────────────
