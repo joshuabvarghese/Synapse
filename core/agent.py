@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Callable
 
 from core.analytics import record_mttr
@@ -130,16 +131,71 @@ def _tool_search_kb(query: str, top_k: int) -> str:
     if not hits:
         return "No matching incidents found in knowledge base."
 
-    def _fmt(h: dict) -> str:
-        res = h["resolution"]
-        preview = res[:400] + ("..." if len(res) > 400 else "")
-        return (
-            f"[{h['inc_id']}] {h['title']} (score={float(h['similarity']):.3f})\n"
-            f"  Severity: {h['severity']} | Service: {h['service']}\n"
-            f"  Resolution: {preview}"
-        )
+    return "\n\n".join(
+        f"[{h['inc_id']}] {h['title']} (score={float(h['similarity']):.3f})\n"
+        f"  Severity: {h['severity']} | Service: {h['service']}\n"
+        f"  Resolution: {h['resolution'][:400]}..."
+        for h in hits
+    )
 
-    return "\n\n".join(_fmt(h) for h in hits)
+
+# ── Fallback tool-call recovery ───────────────────────────────────────────────
+#
+# Smaller / quantized models don't always populate Ollama's structured
+# ``tool_calls`` field — some instead write the call out as plain JSON text
+# in ``content`` (e.g. fenced in ```json``` blocks, or wrapped in <tool_call>
+# tags per the Qwen chat template). Without this recovery step, the agent
+# loop treats that raw text as the final answer and stops after one step,
+# having never actually run a tool.
+
+_FENCE_PATTERNS = [
+    re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL),
+    re.compile(r"```\s*(\{.*?\})\s*```", re.DOTALL),
+    re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL),
+]
+
+
+def _brace_match(text: str) -> str | None:
+    """Return the first balanced {...} blob in *text*, or None."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    for i, ch in enumerate(text[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def _extract_fallback_tool_call(content: str) -> dict | None:
+    """
+    Try to recover a ``{"name": ..., "arguments": {...}}`` payload from a
+    model's free-text response. Returns None if nothing usable is found.
+    """
+    if not content or "{" not in content:
+        return None
+
+    candidates: list[str] = []
+    for pattern in _FENCE_PATTERNS:
+        candidates.extend(pattern.findall(content))
+
+    blob = _brace_match(content)
+    if blob:
+        candidates.append(blob)
+
+    for raw in candidates:
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and "name" in obj and "arguments" in obj:
+            return obj
+
+    return None
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -216,11 +272,20 @@ def run(
         messages.append(message)
 
         tool_calls = message.get("tool_calls") or []
+
         if not tool_calls:
-            # Model produced a final text answer
-            resolution = message.get("content", "").strip()
-            record_mttr(scenario_key, sc["service"], sc["severity"])
-            return AgentResult(resolution=resolution, trace=trace)
+            fallback = _extract_fallback_tool_call(message.get("content", ""))
+            if fallback:
+                logger.debug("Recovered fallback tool call: %s", fallback["name"])
+                tool_calls = [{
+                    "id":       fallback["name"],
+                    "function": {"name": fallback["name"], "arguments": fallback["arguments"]},
+                }]
+            else:
+                # Genuine final text answer — no tool call found anywhere in it.
+                resolution = message.get("content", "").strip()
+                record_mttr(scenario_key, sc["service"], sc["severity"])
+                return AgentResult(resolution=resolution, trace=trace)
 
         for tc in tool_calls:
             fn     = tc["function"]
