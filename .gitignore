@@ -27,3 +27,5 @@ vector-data/
 # Local configs (contains secrets)
 clickhouse-config/
 local-settings.py
+
+.DS_Store
