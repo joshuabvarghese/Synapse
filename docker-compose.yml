@@ -39,7 +39,7 @@ services:
       - ollama_data:/root/.ollama
     entrypoint: >
       sh -c "
-        ollama pull qwen2.5-coder:7b &&
+        ollama pull qwen2.5-coder:3b &&
         ollama pull nomic-embed-text
       "
     environment:
@@ -63,7 +63,7 @@ services:
       POSTGRES_PASSWORD: ops
       POSTGRES_DB: synapse
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: qwen2.5-coder:7b
+      OLLAMA_MODEL: qwen2.5-coder:3b
       EMBED_MODEL: nomic-embed-text
       KB_DIR: /kb
     volumes:
